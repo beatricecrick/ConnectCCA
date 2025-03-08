@@ -1,0 +1,19 @@
+{
+  "name": "localhosttesting",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "express": "^4.21.2",
+    "firebase": "^11.4.0",
+    "localtunnel": "^2.0.2",
+    "socket.io": "^4.8.1"
+  }
+}

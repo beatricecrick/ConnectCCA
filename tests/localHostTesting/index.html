@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>School Chat</title>
+    <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
+</head>
+<body>
+    <h1>Chat</h1>
+    <ul id="messages"></ul>
+    <input id="message" autocomplete="off" /><button onclick="sendMessage()">Send</button>
+
+    <script>
+        const socket = io();
+        
+        // Dummy class info (this would come from Google Classroom)
+        const classInfo = 'Class Name'; // This should be dynamically generated
+
+        socket.emit('join', classInfo);
+
+        // Handle sending messages
+        function sendMessage() {
+            const msg = document.getElementById('message').value;
+            socket.emit('chat message', msg, classInfo);
+            document.getElementById('message').value = ''; // Clear input after sending
+        }
+
+        // Receive messages and update the chat UI
+        socket.on('chat message', function(data) {
+            if (data && data.msg && data.class) {  // Ensure data is not undefined
+                const item = document.createElement('li');
+                item.textContent = `[${data.class}] ${data.msg}`;
+                document.getElementById('messages').appendChild(item);
+            }
+        });
+    </script>
+</body>
+</html>
