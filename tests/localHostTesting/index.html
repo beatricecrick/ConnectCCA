@@ -7,17 +7,58 @@
     <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
 </head>
 <body>
-    <h1>Chat</h1>
-    <ul id="messages"></ul>
-    <input id="message" autocomplete="off" /><button onclick="sendMessage()">Send</button>
+    <h1>School Chat</h1>
+
+    <!-- Username Input -->
+    <div id="login">
+        <label for="username">Enter your name:</label>
+        <input type="text" id="username" />
+        <button onclick="setUserName()">Submit</button>
+    </div>
+
+    <!-- Chat UI (hidden until username is set) -->
+    <div id="chatUI" style="display: none;">
+        <h3>Welcome, <span id="userNameDisplay"></span></h3>
+        <ul id="messages"></ul>
+        <input id="message" autocomplete="off" />
+        <button onclick="sendMessage()">Send</button>
+    </div>
 
     <script>
         const socket = io();
-        
-        // Dummy class info (this would come from Google Classroom)
-        const classInfo = 'Class Name'; // This should be dynamically generated
+        let userName = '';
+        let userId = '';
+        let classInfo = 'Class Name'; // This should be dynamically generated (example: Google Classroom class info)
 
-        socket.emit('join', classInfo);
+        // Set the user's name
+        function setUserName() {
+            userName = document.getElementById('username').value.trim();
+            if (userName) {
+                // Send user data to the server
+                fetch('/addUser', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ userName })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    userId = data.userId;
+                    socket.emit('join', { classInfo, userName, userId });
+                    loadUsers();
+                    showChatUI();
+                })
+                .catch(error => console.error('Error:', error));
+            }
+        }
+
+        // Show chat UI
+        function showChatUI() {
+            document.getElementById('login').style.display = 'none';
+            document.getElementById('chatUI').style.display = 'block';
+            document.getElementById('userNameDisplay').textContent = userName;
+        }
 
         // Handle sending messages
         function sendMessage() {
@@ -34,6 +75,16 @@
                 document.getElementById('messages').appendChild(item);
             }
         });
+
+        // Fetch existing users from Firebase
+        function loadUsers() {
+            fetch('/getUsers')
+                .then(response => response.json())
+                .then(users => {
+                    console.log('Users:', users);
+                    // You can display the list of users here to allow direct messaging
+                });
+        }
     </script>
 </body>
 </html>
