@@ -81,3 +81,6 @@ app.get('/getUsers', async (req, res) => {
 server.listen(3000, () => {
     console.log('Server is running on http://localhost:3000');
 });
+
+//for vercel
+module.exports = app;

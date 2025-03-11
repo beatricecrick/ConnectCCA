@@ -25,11 +25,12 @@
     </div>
 
     <script>
+        
         const socket = io();
         let userName = '';
         let userId = '';
         let classInfo = 'Class Name'; // This should be dynamically generated (example: Google Classroom class info)
-
+        
         // Set the user's name
         function setUserName() {
             userName = document.getElementById('username').value.trim();
@@ -63,16 +64,27 @@
         // Handle sending messages
         function sendMessage() {
             const msg = document.getElementById('message').value;
+            console.log("msg value", msg)
             socket.emit('chat message', msg, classInfo);
             document.getElementById('message').value = ''; // Clear input after sending
         }
 
         // Receive messages and update the chat UI
         socket.on('chat message', function(data) {
-            if (data && data.msg && data.class) {  // Ensure data is not undefined
+            console.log("running chatmsg")
+
+            //Need to add data.class when google classroom is connected
+            if (data && data.msg) {  // Ensure data is not undefined
+                console.log("data")
                 const item = document.createElement('li');
                 item.textContent = `[${data.class}] ${data.msg}`;
                 document.getElementById('messages').appendChild(item);
+            }
+            else{
+                console.log("data is undefined")
+                console.log("data: ", data)
+                console.log("datamsg: ", data.msg)
+                // console.log("data.class", data.class)
             }
         });
 
