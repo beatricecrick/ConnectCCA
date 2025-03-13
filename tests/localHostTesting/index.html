@@ -14,6 +14,7 @@
         <label for="username">Enter your name:</label>
         <input type="text" id="username" />
         <button onclick="setUserName()">Submit</button>
+        <p id="error-message" style="color: red;"></p> <!-- Error message display -->
     </div>
 
     <!-- Chat UI (hidden until username is set) -->
@@ -25,12 +26,11 @@
     </div>
 
     <script>
-        
         const socket = io();
         let userName = '';
         let userId = '';
         let classInfo = 'Class Name'; // This should be dynamically generated (example: Google Classroom class info)
-        
+
         // Set the user's name
         function setUserName() {
             userName = document.getElementById('username').value.trim();
@@ -43,14 +43,22 @@
                     },
                     body: JSON.stringify({ userName })
                 })
-                .then(response => response.json())
+                .then(response => {
+                    if (!response.ok) {
+                        return response.json().then(error => { throw new Error(error.error); });
+                    }
+                    return response.json();
+                })
                 .then(data => {
                     userId = data.userId;
                     socket.emit('join', { classInfo, userName, userId });
                     loadUsers();
                     showChatUI();
                 })
-                .catch(error => console.error('Error:', error));
+                .catch(error => {
+                    document.getElementById('error-message').textContent = error.message; // Display error message
+                    console.error('Error:', error);
+                });
             }
         }
 

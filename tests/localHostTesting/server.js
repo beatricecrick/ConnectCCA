@@ -1,6 +1,6 @@
 const express = require('express');
 const bodyParser = require('body-parser');  // Add body parser to handle POST requests
-const { db } = require('./firebase'); // Import Firestore from firebase.js
+const { db, admin } = require('./firebase'); // Import Firestore from firebase.js
 
 const app = express();
 const http = require('http');
@@ -12,7 +12,8 @@ const io = socketIo(server);
 app.use(bodyParser.json());
 
 let users = {}; // Track connected users
-//get index
+
+// Serve index.html
 app.get("/", (req, res) => {
     res.sendFile(__dirname + "/index.html");
 });
@@ -27,8 +28,11 @@ io.on('connection', async (socket) => {
     });
 
     socket.on('chat message', (msg, classInfo) => {
-        io.emit('chat message', { msg, classInfo });
-        saveMessageToFirestore(msg, classInfo); // Store message in Firestore
+        const user = users[socket.id];
+        if (user) {
+            io.emit('chat message', { msg, classInfo, userName: user.userName });
+            saveMessageToFirestore(msg, classInfo, user.userName); // Store message in Firestore with username
+        }
     });
 
     socket.on('disconnect', () => {
@@ -38,24 +42,40 @@ io.on('connection', async (socket) => {
 });
 
 // Save message to Firebase Firestore
-async function saveMessageToFirestore(msg, classInfo) {
+async function saveMessageToFirestore(msg, classInfo, userName) {
     try {
-        await db.collection('messages').add({
-            message: msg,
-            class: classInfo,
-            timestamp: new Date(),
+        const userRef = db.collection("location").doc("userInfo").collection("User Message").doc(userName);
+        const doc = await userRef.get();
+        if (!doc.exists) {
+            await userRef.set({ messages: [] }); // Initialize the document with an empty messages array
+        }
+        await userRef.update({
+            messages: admin.firestore.FieldValue.arrayUnion({
+                message: msg,
+                class: classInfo,
+                timestamp: new Date(),
+            })
         });
-        console.log('Message saved to Firestore');
+        console.log('Message appended to Firestore');
     } catch (error) {
-        console.error('Error saving message:', error);
+        console.error('Error appending message:', error);
     }
 }
 
 // Add user to Firestore
 app.post('/addUser', async (req, res) => {
     const { userName } = req.body;
+    console.log("Received request to add user:", req.body);
+    console.log("username", userName);
     try {
-        const userRef = await db.collection('users').add({
+        const userRef = db.collection('users').doc(userName);
+        const doc = await userRef.get();
+        if (doc.exists) {
+            console.log("USERNAME ALREADY TAKEN");
+            return res.status(400).json({ error: 'Username already taken' });
+        }
+        console.log("USERNAME AVAILABLE");
+        await userRef.set({
             name: userName,
             timestamp: new Date(),
         });
