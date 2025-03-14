@@ -5,16 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>School Chat</title>
     <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
-    
 </head>
 <body>
     <h1>School Chat</h1>
 
-    <!-- Username Input -->
+    <!-- Username and Password Input -->
     <div id="login">
-        <label for="username">Enter your name:</label>
+        <label for="username">Enter your username:</label>
         <input type="text" id="username" />
-        <button onclick="setUserName()">Submit</button>
+        <label for="password">Enter your password:</label>
+        <input type="password" id="password" />
+        <button onclick="login()">Login</button>
         <p id="error-message" style="color: red;"></p> <!-- Error message display -->
     </div>
 
@@ -23,7 +24,6 @@
         <h3>Welcome, <span id="userNameDisplay"></span></h3>
         <button onclick="signOut()">Sign Out</button>
         <select id="chatSelect" onchange="selectChat()">
-            <option value="">Select a chat</option>
         </select>
         <ul id="messages"></ul>
         <input id="message" autocomplete="off" />
@@ -37,19 +37,20 @@
         let userName = localStorage.getItem('userName') || '';
         let userId = localStorage.getItem('userId') || '';
         let classInfo = 'Class Name'; // This should be dynamically generated (example: Google Classroom class info)
-        let currentChat = '';
+        let currentChat = 'public'; // Default to public chat
 
-        // Set the user's name
-        function setUserName() {
+        // Handle user login
+        function login() {
             userName = document.getElementById('username').value.trim();
-            if (userName) {
-                // Send user data to the server
-                fetch('/addUser', {
+            const password = document.getElementById('password').value.trim();
+            if (userName && password) {
+                // Send login data to the server
+                fetch('/login', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ userName })
+                    body: JSON.stringify({ userName, password })
                 })
                 .then(response => {
                     if (!response.ok) {
@@ -58,13 +59,20 @@
                     return response.json();
                 })
                 .then(data => {
-                    userId = data.userId;
-                    localStorage.setItem('userName', userName);
-                    localStorage.setItem('userId', userId);
-                    socket.emit('join', { classInfo, userName, userId });
-                    loadUsers();
-                    loadChats();
-                    showChatUI();
+                    if (data.newUser) {
+                        if (confirm('User not found. Do you want to create a new account?')) {
+                            createUser(userName, password);
+                        }
+                    } else {
+                        userId = data.userId;
+                        localStorage.setItem('userName', userName);
+                        localStorage.setItem('userId', userId);
+                        socket.emit('join', { classInfo, userName, userId });
+                        loadUsers();
+                        loadChats();
+                        showChatUI();
+                        setInterval(checkDMs, 30000); // Check DMs every 30 seconds
+                    }
                 })
                 .catch(error => {
                     document.getElementById('error-message').textContent = error.message; // Display error message
@@ -73,16 +81,53 @@
             }
         }
 
+        // Create a new user
+        function createUser(userName, password) {
+            fetch('/createUser', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ userName, password })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(error => { throw new Error(error.error); });
+                }
+                return response.json();
+            })
+            .then(data => {
+                userId = data.userId;
+                localStorage.setItem('userName', userName);
+                localStorage.setItem('userId', userId);
+                socket.emit('join', { classInfo, userName, userId });
+                loadUsers();
+                loadChats();
+                showChatUI();
+                setInterval(checkDMs, 30000); // Check DMs every 30 seconds
+            })
+            .catch(error => {
+                document.getElementById('error-message').textContent = error.message; // Display error message
+                console.error('Error:', error);
+            });
+        }
+
         // Show chat UI
         function showChatUI() {
             document.getElementById('login').style.display = 'none';
             document.getElementById('chatUI').style.display = 'block';
             document.getElementById('userNameDisplay').textContent = userName;
+            socket.emit('join', { classInfo, userName, userId }); // Rejoin the chat room
+            selectChat(); // Automatically select the public chat
         }
 
         // Handle sending messages
         function sendMessage() {
             const msg = document.getElementById('message').value;
+            if (!currentChat) {
+                alert('Please select a chat first.');
+                return;
+            }
             console.log("msg value", msg)
             socket.emit('chat message', msg, currentChat);
             document.getElementById('message').value = ''; // Clear input after sending
@@ -90,7 +135,13 @@
 
         // Handle creating a new location
         async function createLocation() {
-            let baseLocationName = userName;
+            const locationInput = document.getElementById('location');
+            if (locationInput.value.trim() === "") {
+                alert('Please enter a location name.');
+                return;
+            }
+            console.log("location value", locationInput.value)
+            let baseLocationName = locationInput.value.trim();
             let locationName = baseLocationName;
             let i = 1;
 
@@ -99,8 +150,8 @@
                 i++;
             }
 
-            // Navigate to the add members page
-            window.location.href = `/addMembers.html?location=${locationName}`;
+            // Navigate to the add members page with owner parameter
+            window.location.href = `/addMembers.html?location=${locationName}&owner=${userName}`;
         }
 
         // Check if a location exists
@@ -143,13 +194,23 @@
                 .then(response => response.json())
                 .then(chats => {
                     const chatSelect = document.getElementById('chatSelect');
+                    chatSelect.innerHTML = ''; // Reset chat options
                     chats.forEach(chat => {
                         const option = document.createElement('option');
                         option.value = chat;
                         option.textContent = chat;
                         chatSelect.appendChild(option);
                     });
+                    if (chats.length > 0 && !currentChat) {
+                        currentChat = chats[0]; // Set currentChat to the first chat if not already set
+                        chatSelect.value = currentChat; // Update the dropdown to reflect the selected chat
+                    }
                 });
+        }
+
+        // Check DMs and update the dropdown
+        function checkDMs() {
+            loadChats();
         }
 
         // Select a chat
@@ -157,9 +218,10 @@
             currentChat = document.getElementById('chatSelect').value;
             document.getElementById('messages').innerHTML = ''; // Clear previous messages
             // Fetch and display messages for the selected chat
-            fetch(`/getMessages?chat=${currentChat}`)
+            fetch(`/getMessages?chat=${currentChat}&userName=${userName}`)
                 .then(response => response.json())
                 .then(messages => {
+                    document.getElementById('messages').innerHTML = ''; // Clear previous messages
                     messages.forEach(message => {
                         const item = document.createElement('li');
                         item.textContent = `[${message.class}] ${message.msg}`;
@@ -184,8 +246,18 @@
 
         // Show chat UI if user is already logged in
         if (userName) {
-            showChatUI();
-            loadChats();
+            fetch(`/getUsers`)
+                .then(response => response.json())
+                .then(users => {
+                    if (users.some(user => user.name === userName)) {
+                        showChatUI();
+                        loadChats();
+                        setInterval(checkDMs, 30000); // Check DMs every 30 seconds
+                    } else {
+                        localStorage.removeItem('userName');
+                        localStorage.removeItem('userId');
+                    }
+                });
         }
     </script>
 </body>

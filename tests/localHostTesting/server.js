@@ -1,6 +1,7 @@
 const express = require('express');
 const bodyParser = require('body-parser');  // Add body parser to handle POST requests
 const { db, admin } = require('./firebase'); // Import Firestore from firebase.js
+const bcrypt = require('bcrypt'); // For password hashing
 
 const app = express();
 const http = require('http');
@@ -34,9 +35,13 @@ io.on('connection', async (socket) => {
 
     socket.on('chat message', (msg, chat) => {
         const user = users[socket.id];
-        if (user) {
+        if (user && chat) {
             io.emit('chat message', { msg, chat, userName: user.userName });
             saveMessageToFirestore(msg, chat, user.userName); // Store message in Firestore with username
+        } else {
+            console.error('Error: User or chat is not defined');
+            console.log('User:', user);
+            console.log('Chat:', chat);
         }
     });
 
@@ -49,11 +54,16 @@ io.on('connection', async (socket) => {
 // Save message to Firebase Firestore
 async function saveMessageToFirestore(msg, chat, userName) {
     try {
-        const chatRef = db.collection("chats").doc(chat).collection("messages");
-        await chatRef.add({
+        if (!chat) {
+            throw new Error('Chat is not defined');
+        }
+        const timestamp = new Date().toISOString();
+        const messageId = `${userName}_${timestamp}`;
+        const chatRef = db.collection("locations").doc(chat).collection("users").doc(userName).collection("messages").doc(messageId);
+        await chatRef.set({
             message: msg,
-            userName: userName,
-            timestamp: new Date(),
+            time: new Date(),
+            date: new Date().toLocaleDateString(),
         });
         console.log('Message appended to Firestore');
     } catch (error) {
@@ -62,10 +72,9 @@ async function saveMessageToFirestore(msg, chat, userName) {
 }
 
 // Add user to Firestore
-app.post('/addUser', async (req, res) => {
-    const { userName } = req.body;
-    console.log("Received request to add user:", req.body);
-    console.log("username", userName);
+app.post('/createUser', async (req, res) => {
+    const { userName, password } = req.body;
+    console.log("Received request to create user:", req.body);
     try {
         const userRef = db.collection('users').doc(userName);
         const doc = await userRef.get();
@@ -73,14 +82,53 @@ app.post('/addUser', async (req, res) => {
             console.log("USERNAME ALREADY TAKEN");
             return res.status(400).json({ error: 'Username already taken' });
         }
-        console.log("USERNAME AVAILABLE");
+        const hashedPassword = await bcrypt.hash(password, 10);
         await userRef.set({
             name: userName,
-            timestamp: new Date(),
+            password: hashedPassword,
+            info: '',
+            time: new Date(),
+            date: new Date().toLocaleDateString(),
         });
+
+        // Ensure "Public Chat" exists in the locations collection
+        const publicLocationRef = db.collection('locations').doc('public');
+        const publicLocationDoc = await publicLocationRef.get();
+        if (!publicLocationDoc.exists) {
+            await publicLocationRef.set({
+                name: 'public',
+                info: 'Public chat for all users',
+                settings: {},
+                time: new Date(),
+                date: new Date().toLocaleDateString(),
+            });
+        }
+
         res.json({ userId: userRef.id });
     } catch (error) {
-        console.error('Error adding user:', error);
+        console.error('Error creating user:', error);
+        res.status(500).send('Internal Server Error');
+    }
+});
+
+// Authenticate user
+app.post('/login', async (req, res) => {
+    const { userName, password } = req.body;
+    console.log("Received login request:", req.body);
+    try {
+        const userRef = db.collection('users').doc(userName);
+        const doc = await userRef.get();
+        if (!doc.exists) {
+            return res.json({ newUser: true });
+        }
+        const userData = doc.data();
+        const passwordMatch = await bcrypt.compare(password, userData.password);
+        if (!passwordMatch) {
+            return res.status(401).json({ error: 'Invalid username or password' });
+        }
+        res.json({ userId: userRef.id });
+    } catch (error) {
+        console.error('Error logging in:', error);
         res.status(500).send('Internal Server Error');
     }
 });
@@ -96,20 +144,26 @@ app.get('/getUsers', async (req, res) => {
         res.status(500).send('Internal Server Error');
     }
 });
-//Check for users as a querey
+
+// Search users
 app.get('/searchUsers', async (req, res) => {
     const { query } = req.query;
-    console.log("Received search query:", query);
+    console.log("Received request to search users:", query);
+
+    if (!query) {
+        return res.status(400).json({ error: 'Query is required' });
+    }
+
     try {
         const snapshot = await db.collection('users').get();
-        const usersList = snapshot.docs.map(doc => doc.data().name);
-        const filteredUsers = usersList.filter(user => user.toLowerCase().startsWith(query.toLowerCase()));
-        res.json(filteredUsers);
+        const users = snapshot.docs.map(doc => doc.id).filter(userName => userName.toLowerCase().includes(query.toLowerCase()));
+        res.json(users);
     } catch (error) {
         console.error('Error searching users:', error);
         res.status(500).json({ error: 'Internal Server Error' });
     }
 });
+
 // Check if a location exists
 app.get('/checkLocation', async (req, res) => {
     const { locationName } = req.query;
@@ -138,16 +192,26 @@ app.post('/createLocation', async (req, res) => {
         console.log("LOCATION AVAILABLE");
         await locationRef.set({
             name: locationName,
-            members: members,
-            timestamp: new Date(),
+            info: '',
+            settings: {},
+            time: new Date(),
+            date: new Date().toLocaleDateString(),
         });
 
-        // Update users' chats
+        // Add users to the location and update their chats
         const batch = db.batch();
         members.forEach(member => {
-            const userRef = db.collection('users').doc(member);
-            batch.update(userRef, {
-                chats: admin.firestore.FieldValue.arrayUnion(locationName)
+            const userRef = locationRef.collection('users').doc(member);
+            batch.set(userRef, {
+                info: '',
+                settings: {},
+            });
+
+            const userChatRef = db.collection('users').doc(member).collection('chats').doc(locationName);
+            batch.set(userChatRef, {
+                locationName: locationName,
+                time: new Date(),
+                date: new Date().toLocaleDateString(),
             });
         });
         await batch.commit();
@@ -165,12 +229,9 @@ app.get('/getChats', async (req, res) => {
     console.log("Received request to get chats for user:", userName);
     try {
         const userRef = db.collection('users').doc(userName);
-        const doc = await userRef.get();
-        if (!doc.exists) {
-            return res.status(404).json({ error: 'User not found' });
-        }
-        const userData = doc.data();
-        res.json(userData.chats || []);
+        const snapshot = await userRef.collection('chats').get();
+        const chats = snapshot.docs.map(doc => doc.id);
+        res.json(chats);
     } catch (error) {
         console.error('Error getting chats:', error);
         res.status(500).json({ error: 'Internal Server Error' });
@@ -181,9 +242,35 @@ app.get('/getChats', async (req, res) => {
 app.get('/getMessages', async (req, res) => {
     const { chat } = req.query;
     console.log("Received request to get messages for chat:", chat);
+    
+    // Validate chat
+    if (!chat) {
+        return res.status(400).json({ error: 'Chat is required' });
+    }
+
     try {
-        const snapshot = await db.collection('chats').doc(chat).collection('messages').orderBy('timestamp').get();
-        const messages = snapshot.docs.map(doc => doc.data());
+        const usersSnapshot = await db.collection('locations').doc(chat).collection('users').get();
+        let messages = [];
+
+        for (const userDoc of usersSnapshot.docs) {
+            const userName = userDoc.id;
+            const messagesSnapshot = await db.collection('locations').doc(chat).collection('users').doc(userName).collection('messages').orderBy('time').get();
+            const userMessages = messagesSnapshot.docs.map(doc => {
+                const data = doc.data();
+                console.log('Retrieved message:', data); // Log the message data
+                return {
+                    message: data.message,
+                    time: data.time,
+                    date: data.date,
+                    userName: userName
+                };
+            });
+            messages = messages.concat(userMessages);
+        }
+
+        // Sort all messages by timestamp
+        messages.sort((a, b) => a.time.toDate() - b.time.toDate());
+
         res.json(messages);
     } catch (error) {
         console.error('Error getting messages:', error);

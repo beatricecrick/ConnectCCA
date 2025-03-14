@@ -21,10 +21,16 @@
     <script>
         const urlParams = new URLSearchParams(window.location.search);
         const locationName = urlParams.get('location');
+        const owner = urlParams.get('owner'); // Get the owner from the URL
         const membersList = document.getElementById('membersList');
         const searchResults = document.getElementById('searchResults');
-        let members = [];
+        let members = [owner]; // Automatically add the owner to the members list
         let searchResultsCache = [];
+
+        // Display the owner in the members list
+        const ownerItem = document.createElement('li');
+        ownerItem.textContent = owner;
+        membersList.appendChild(ownerItem);
 
         // Search users as the user types
         function searchUsers() {
@@ -36,7 +42,7 @@
                         searchResultsCache = users;
                         searchResults.innerHTML = '';
                         users.forEach(user => {
-                            if (user.toLowerCase().startsWith(query)) {
+                            if (user.toLowerCase().startsWith(query) && user !== owner) { // Exclude the owner from search results
                                 const item = document.createElement('li');
                                 item.textContent = user;
                                 item.onclick = () => selectUser(user);
@@ -75,7 +81,11 @@
 
         // Confirm members and send data to the server
         function confirmMembers() {
-            if (locationName && members.length > 0) {
+            if (!locationName) {
+                alert('Please enter a location name.');
+                return;
+            }
+            if (members.length > 0) {
                 fetch('/createLocation', {
                     method: 'POST',
                     headers: {
