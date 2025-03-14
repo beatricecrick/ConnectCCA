@@ -5,23 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>School Chat</title>
     <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
-    
+    <script src="https://apis.google.com/js/platform.js" async defer></script>
+    <meta name="google-signin-client_id" content="YOUR_GOOGLE_CLIENT_ID">
+    <meta http-equiv="Cross-Origin-Opener-Policy" content="same-origin">
 </head>
 <body>
     <h1>School Chat</h1>
 
     <!-- Username Input -->
     <div id="login">
-        <label for="username">Enter your name:</label>
-        <input type="text" id="username" />
-        <button onclick="setUserName()">Submit</button>
+        <div class="g-signin2" data-onsuccess="onSignIn"></div>
         <p id="error-message" style="color: red;"></p> <!-- Error message display -->
     </div>
 
     <!-- Chat UI (hidden until username is set) -->
     <div id="chatUI" style="display: none;">
         <h3>Welcome, <span id="userNameDisplay"></span></h3>
-        <button onclick="signOut()">Sign Out</button>
+        <a href="#" onclick="signOut();">Sign out</a>
         <select id="chatSelect" onchange="selectChat()">
             <option value="">Select a chat</option>
         </select>
@@ -38,39 +38,57 @@
         let userId = localStorage.getItem('userId') || '';
         let classInfo = 'Class Name'; // This should be dynamically generated (example: Google Classroom class info)
         let currentChat = '';
-
-        // Set the user's name
-        function setUserName() {
-            userName = document.getElementById('username').value.trim();
-            if (userName) {
-                // Send user data to the server
-                fetch('/addUser', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ userName })
-                })
-                .then(response => {
-                    if (!response.ok) {
-                        return response.json().then(error => { throw new Error(error.error); });
+        //Ensure google API loads
+        window.onload = function() {
+            initGoogleSignIn();
+        };
+        // Initialize Google Sign-In
+        function initGoogleSignIn() {
+            gapi.load('auth2', function() {
+                gapi.auth2.init().then(function() {
+                    if (gapi.auth2.getAuthInstance().isSignedIn.get()) {
+                        onSignIn(gapi.auth2.getAuthInstance().currentUser.get());
                     }
-                    return response.json();
-                })
-                .then(data => {
-                    userId = data.userId;
-                    localStorage.setItem('userName', userName);
-                    localStorage.setItem('userId', userId);
-                    socket.emit('join', { classInfo, userName, userId });
-                    loadUsers();
-                    loadChats();
-                    showChatUI();
-                })
-                .catch(error => {
-                    document.getElementById('error-message').textContent = error.message; // Display error message
-                    console.error('Error:', error);
                 });
-            }
+            });
+        }
+
+        // Handle Google Sign-In
+        function onSignIn(googleUser) {
+            var profile = googleUser.getBasicProfile();
+            userName = profile.getName();
+            userId = profile.getId();
+            localStorage.setItem('userName', userName);
+            localStorage.setItem('userId', userId);
+            console.log('ID: ' + userId);
+            console.log('Name: ' + userName);
+            console.log('Image URL: ' + profile.getImageUrl());
+            console.log('Email: ' + profile.getEmail());
+
+            // Send user data to the server
+            fetch('/addUser', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ userName })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(error => { throw new Error(error.error); });
+                }
+                return response.json();
+            })
+            .then(data => {
+                socket.emit('join', { classInfo, userName, userId });
+                loadUsers();
+                loadChats();
+                showChatUI();
+            })
+            .catch(error => {
+                document.getElementById('error-message').textContent = error.message; // Display error message
+                console.error('Error:', error);
+            });
         }
 
         // Show chat UI
@@ -170,23 +188,29 @@
 
         // Sign out the user
         function signOut() {
-            localStorage.removeItem('userName');
-            localStorage.removeItem('userId');
-            location.reload(); // Reload the page to show the login screen
+            var auth2 = gapi.auth2.getAuthInstance();
+            auth2.signOut().then(function () {
+                console.log('User signed out.');
+                localStorage.removeItem('userName');
+                localStorage.removeItem('userId');
+                location.reload(); // Reload the page to show the login screen
+            });
         }
 
         // Ensure the chat UI is shown if the user navigates back
-        window.addEventListener('popstate', function(event) {
-            if (userName) {
-                showChatUI();
-            }
-        });
+        // window.addEventListener('popstate', function(event) {
+        //     if (userName) {
+        //         showChatUI();
+        //     }
+        // });
 
-        // Show chat UI if user is already logged in
-        if (userName) {
-            showChatUI();
-            loadChats();
-        }
+        // // Show chat UI if user is already logged in
+        // if (userName) {
+        //     showChatUI();
+        //     loadChats();
+        // }
+
+        // Initialize Google Sign-In
     </script>
 </body>
 </html>

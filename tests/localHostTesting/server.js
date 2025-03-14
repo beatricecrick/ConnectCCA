@@ -18,6 +18,11 @@ app.get("/", (req, res) => {
     res.sendFile(__dirname + "/index.html");
 });
 
+// Serve addMembers.html
+app.get("/addMembers.html", (req, res) => {
+    res.sendFile(__dirname + "/addMembers.html");
+});
+
 // Handle real-time chat
 io.on('connection', async (socket) => {
     console.log('A user connected:', socket.id);
@@ -27,11 +32,11 @@ io.on('connection', async (socket) => {
         console.log(`${socket.id} joined class ${data.classInfo} as ${data.userName}`);
     });
 
-    socket.on('chat message', (msg, classInfo) => {
+    socket.on('chat message', (msg, chat) => {
         const user = users[socket.id];
         if (user) {
-            io.emit('chat message', { msg, classInfo, userName: user.userName });
-            saveMessageToFirestore(msg, classInfo, user.userName); // Store message in Firestore with username
+            io.emit('chat message', { msg, chat, userName: user.userName });
+            saveMessageToFirestore(msg, chat, user.userName); // Store message in Firestore with username
         }
     });
 
@@ -42,19 +47,13 @@ io.on('connection', async (socket) => {
 });
 
 // Save message to Firebase Firestore
-async function saveMessageToFirestore(msg, classInfo, userName) {
+async function saveMessageToFirestore(msg, chat, userName) {
     try {
-        const userRef = db.collection("location").doc("userInfo").collection("User Message").doc(userName);
-        const doc = await userRef.get();
-        if (!doc.exists) {
-            await userRef.set({ messages: [] }); // Initialize the document with an empty messages array
-        }
-        await userRef.update({
-            messages: admin.firestore.FieldValue.arrayUnion({
-                message: msg,
-                class: classInfo,
-                timestamp: new Date(),
-            })
+        const chatRef = db.collection("chats").doc(chat).collection("messages");
+        await chatRef.add({
+            message: msg,
+            userName: userName,
+            timestamp: new Date(),
         });
         console.log('Message appended to Firestore');
     } catch (error) {
@@ -95,6 +94,100 @@ app.get('/getUsers', async (req, res) => {
     } catch (error) {
         console.error('Error fetching users:', error);
         res.status(500).send('Internal Server Error');
+    }
+});
+//Check for users as a querey
+app.get('/searchUsers', async (req, res) => {
+    const { query } = req.query;
+    console.log("Received search query:", query);
+    try {
+        const snapshot = await db.collection('users').get();
+        const usersList = snapshot.docs.map(doc => doc.data().name);
+        const filteredUsers = usersList.filter(user => user.toLowerCase().startsWith(query.toLowerCase()));
+        res.json(filteredUsers);
+    } catch (error) {
+        console.error('Error searching users:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+// Check if a location exists
+app.get('/checkLocation', async (req, res) => {
+    const { locationName } = req.query;
+    console.log("Received request to check location:", locationName);
+    try {
+        const locationRef = db.collection('locations').doc(locationName);
+        const doc = await locationRef.get();
+        res.json({ exists: doc.exists });
+    } catch (error) {
+        console.error('Error checking location:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// Create the location and update users' chats
+app.post('/createLocation', async (req, res) => {
+    const { locationName, members } = req.body;
+    console.log("Received request to create location:", req.body);
+    try {
+        const locationRef = db.collection('locations').doc(locationName);
+        const doc = await locationRef.get();
+        if (doc.exists) {
+            console.log("LOCATION ALREADY EXISTS");
+            return res.status(400).json({ error: 'Location already exists' });
+        }
+        console.log("LOCATION AVAILABLE");
+        await locationRef.set({
+            name: locationName,
+            members: members,
+            timestamp: new Date(),
+        });
+
+        // Update users' chats
+        const batch = db.batch();
+        members.forEach(member => {
+            const userRef = db.collection('users').doc(member);
+            batch.update(userRef, {
+                chats: admin.firestore.FieldValue.arrayUnion(locationName)
+            });
+        });
+        await batch.commit();
+
+        res.json({ locationId: locationRef.id });
+    } catch (error) {
+        console.error('Error creating location:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// Get chats for a user
+app.get('/getChats', async (req, res) => {
+    const { userName } = req.query;
+    console.log("Received request to get chats for user:", userName);
+    try {
+        const userRef = db.collection('users').doc(userName);
+        const doc = await userRef.get();
+        if (!doc.exists) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        const userData = doc.data();
+        res.json(userData.chats || []);
+    } catch (error) {
+        console.error('Error getting chats:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// Get messages for a chat
+app.get('/getMessages', async (req, res) => {
+    const { chat } = req.query;
+    console.log("Received request to get messages for chat:", chat);
+    try {
+        const snapshot = await db.collection('chats').doc(chat).collection('messages').orderBy('timestamp').get();
+        const messages = snapshot.docs.map(doc => doc.data());
+        res.json(messages);
+    } catch (error) {
+        console.error('Error getting messages:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
     }
 });
 
