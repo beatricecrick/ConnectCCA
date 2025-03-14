@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>School Chat</title>
+    <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
+</head>
+<body>
+    <h1>School Chat</h1>
+
+    <!-- Username and Password Input -->
+    <div id="login">
+        <label for="username">Enter your username:</label>
+        <input type="text" id="username" />
+        <label for="password">Enter your password:</label>
+        <input type="password" id="password" />
+        <button onclick="login()">Login</button>
+        <p id="error-message" style="color: red;"></p> <!-- Error message display -->
+    </div>
+
+    <!-- Chat UI (hidden until username is set) -->
+    <div id="chatUI" style="display: none;">
+        <h3>Welcome, <span id="userNameDisplay"></span></h3>
+        <button onclick="signOut()">Sign Out</button>
+        <select id="chatSelect" onchange="selectChat()">
+        </select>
+        <ul id="messages"></ul>
+        <input id="message" autocomplete="off" />
+        <button onclick="sendMessage()">Send</button>
+        <input id="location" autocomplete="off" placeholder="Enter location name" />
+        <button onclick="createLocation()">Create Group Chat</button>
+    </div>
+
+    <script>
+        const socket = io();
+        let userName = localStorage.getItem('userName') || '';
+        let userId = localStorage.getItem('userId') || '';
+        let classInfo = 'Class Name'; // This should be dynamically generated (example: Google Classroom class info)
+        let currentChat = 'public'; // Default to public chat
+
+        // Handle user login
+        function login() {
+            userName = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value.trim();
+            if (userName && password) {
+                // Send login data to the server
+                fetch('/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ userName, password })
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        return response.json().then(error => { throw new Error(error.error); });
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.newUser) {
+                        if (confirm('User not found. Do you want to create a new account?')) {
+                            createUser(userName, password);
+                        }
+                    } else {
+                        userId = data.userId;
+                        localStorage.setItem('userName', userName);
+                        localStorage.setItem('userId', userId);
+                        socket.emit('join', { classInfo, userName, userId });
+                        loadUsers();
+                        loadChats();
+                        showChatUI();
+                        setInterval(checkDMs, 30000); // Check DMs every 30 seconds
+                    }
+                })
+                .catch(error => {
+                    document.getElementById('error-message').textContent = error.message; // Display error message
+                    console.error('Error:', error);
+                });
+            }
+        }
+
+        // Create a new user
+        function createUser(userName, password) {
+            fetch('/createUser', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ userName, password })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(error => { throw new Error(error.error); });
+                }
+                return response.json();
+            })
+            .then(data => {
+                userId = data.userId;
+                localStorage.setItem('userName', userName);
+                localStorage.setItem('userId', userId);
+                socket.emit('join', { classInfo, userName, userId });
+                loadUsers();
+                loadChats();
+                showChatUI();
+                setInterval(checkDMs, 30000); // Check DMs every 30 seconds
+            })
+            .catch(error => {
+                document.getElementById('error-message').textContent = error.message; // Display error message
+                console.error('Error:', error);
+            });
+        }
+
+        // Show chat UI
+        function showChatUI() {
+            document.getElementById('login').style.display = 'none';
+            document.getElementById('chatUI').style.display = 'block';
+            document.getElementById('userNameDisplay').textContent = userName;
+            socket.emit('join', { classInfo, userName, userId }); // Rejoin the chat room
+            currentChat = 'public'
+            chatSelect.value = currentChat
+            selectChat();
+            // if (currentChat) {
+            //     selectChat(); // Automatically select the current chat
+            // }
+        }
+
+        // Handle sending messages
+        function sendMessage() {
+            const msg = document.getElementById('message').value;
+            if (!currentChat) {
+                alert('Please select a chat first.');
+                return;
+            }
+            console.log("msg value", msg)
+            socket.emit('chat message', msg, currentChat);
+            document.getElementById('message').value = ''; // Clear input after sending
+        }
+
+        // Handle creating a new location
+        async function createLocation() {
+            const locationInput = document.getElementById('location');
+            if (locationInput.value.trim() === "") {
+                alert('Please enter a location name.');
+                return;
+            }
+            console.log("location value", locationInput.value)
+            let baseLocationName = locationInput.value.trim();
+            let locationName = baseLocationName;
+            let i = 1;
+
+            while (await locationExists(locationName)) {
+                locationName = `${baseLocationName}+${i}`;
+                i++;
+            }
+
+            // Navigate to the add members page with owner parameter
+            window.location.href = `/addMembers.html?location=${locationName}&owner=${userName}`;
+        }
+
+        // Check if a location exists
+        async function locationExists(locationName) {
+            const response = await fetch(`/checkLocation?locationName=${locationName}`);
+            const data = await response.json();
+            return data.exists;
+        }
+
+        // Receive messages and update the chat UI
+        socket.on('chat message', function(data) {
+            console.log("running chatmsg")
+
+            if (data && data.msg && data.chat === currentChat) {  // Ensure data is not undefined and matches the current chat
+                console.log("data")
+                const item = document.createElement('li');
+                item.textContent = `[${data.class}] ${data.msg}`;
+                document.getElementById('messages').appendChild(item);
+            }
+            else{
+                console.log("data is undefined or does not match current chat")
+                console.log("data: ", data)
+                console.log("datamsg: ", data.msg)
+            }
+        });
+
+        // Fetch existing users from Firebase
+        function loadUsers() {
+            fetch('/getUsers')
+                .then(response => response.json())
+                .then(users => {
+                    console.log('Users:', users);
+                    // You can display the list of users here to allow direct messaging
+                });
+        }
+
+        // Fetch existing chats from Firebase
+        function loadChats() {
+            fetch(`/getChats?userName=${userName}`)
+                .then(response => response.json())
+                .then(chats => {
+                    const chatSelect = document.getElementById('chatSelect');
+                    chatSelect.innerHTML = ''; // Reset chat options
+                    chats.forEach(chat => {
+                        const option = document.createElement('option');
+                        option.value = chat;
+                        option.textContent = chat;
+                        chatSelect.appendChild(option);
+                    });
+                    if (chats.length > 0 && !currentChat) {
+                        currentChat = chats[0]; // Set currentChat to the first chat if not already set
+                        chatSelect.value = currentChat; // Update the dropdown to reflect the selected chat
+                    }
+                });
+        }
+
+        // Check DMs and update the dropdown
+        function checkDMs() {
+            loadChats();
+        }
+
+ // Select a chat
+function selectChat() {
+    currentChat = document.getElementById('chatSelect').value || 'public'; // Default to 'public' if no chat is selected
+    document.getElementById('messages').innerHTML = ''; // Clear previous messages
+    // Fetch and display messages for the selected chat
+    fetch(`/getMessages?chat=${currentChat}&userName=${userName}`)
+        .then(response => response.json())
+        .then(messages => {
+            console.log("Fetched messages:", messages); // Log the fetched messages
+            document.getElementById('messages').innerHTML = ''; // Clear previous messages
+            if (Array.isArray(messages)) {
+                messages.forEach(message => {
+                    const item = document.createElement('li');
+                    item.textContent = `[${message.class}] ${message.message}`;
+                    document.getElementById('messages').appendChild(item);
+                });
+            } else {
+                console.error('Error: messages is not an array', messages);
+            }
+        })
+        .catch(error => {
+            console.error('Error fetching messages:', error);
+        });
+}
+
+        // Sign out the user
+        function signOut() {
+            localStorage.removeItem('userName');
+            localStorage.removeItem('userId');
+            location.reload(); // Reload the page to show the login screen
+        }
+
+        // Ensure the chat UI is shown if the user navigates back
+        window.addEventListener('popstate', function(event) {
+            if (userName) {
+                showChatUI();
+            }
+        });
+
+        // Show chat UI if user is already logged in
+        if (userName) {
+            fetch(`/getUsers`)
+                .then(response => response.json())
+                .then(users => {
+                    if (users.some(user => user.name === userName)) {
+                        showChatUI();
+                        loadChats();
+                        setInterval(checkDMs, 30000); // Check DMs every 30 seconds
+                    } else {
+                        localStorage.removeItem('userName');
+                        localStorage.removeItem('userId');
+                    }
+                });
+        }
+    </script>
+</body>
+</html>

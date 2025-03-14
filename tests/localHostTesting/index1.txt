@@ -118,7 +118,12 @@
             document.getElementById('chatUI').style.display = 'block';
             document.getElementById('userNameDisplay').textContent = userName;
             socket.emit('join', { classInfo, userName, userId }); // Rejoin the chat room
-            selectChat(); // Automatically select the public chat
+            currentChat = 'public'
+            chatSelect.value = currentChat
+            selectChat();
+            // if (currentChat) {
+            //     selectChat(); // Automatically select the current chat
+            // }
         }
 
         // Handle sending messages
@@ -213,22 +218,30 @@
             loadChats();
         }
 
-        // Select a chat
-        function selectChat() {
-            currentChat = document.getElementById('chatSelect').value;
+ // Select a chat
+function selectChat() {
+    currentChat = document.getElementById('chatSelect').value || 'public'; // Default to 'public' if no chat is selected
+    document.getElementById('messages').innerHTML = ''; // Clear previous messages
+    // Fetch and display messages for the selected chat
+    fetch(`/getMessages?chat=${currentChat}&userName=${userName}`)
+        .then(response => response.json())
+        .then(messages => {
+            console.log("Fetched messages:", messages); // Log the fetched messages
             document.getElementById('messages').innerHTML = ''; // Clear previous messages
-            // Fetch and display messages for the selected chat
-            fetch(`/getMessages?chat=${currentChat}&userName=${userName}`)
-                .then(response => response.json())
-                .then(messages => {
-                    document.getElementById('messages').innerHTML = ''; // Clear previous messages
-                    messages.forEach(message => {
-                        const item = document.createElement('li');
-                        item.textContent = `[${message.class}] ${message.msg}`;
-                        document.getElementById('messages').appendChild(item);
-                    });
+            if (Array.isArray(messages)) {
+                messages.forEach(message => {
+                    const item = document.createElement('li');
+                    item.textContent = `[${message.class}] ${message.message}`;
+                    document.getElementById('messages').appendChild(item);
                 });
-        }
+            } else {
+                console.error('Error: messages is not an array', messages);
+            }
+        })
+        .catch(error => {
+            console.error('Error fetching messages:', error);
+        });
+}
 
         // Sign out the user
         function signOut() {
