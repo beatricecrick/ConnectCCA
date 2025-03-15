@@ -12,6 +12,9 @@ const io = socketIo(server);
 // Middleware to parse JSON body
 app.use(bodyParser.json());
 
+// Serve static files
+app.use(express.static(__dirname));
+
 let users = {}; // Track connected users
 
 // Serve index.html
