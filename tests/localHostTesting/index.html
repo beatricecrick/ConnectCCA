@@ -163,18 +163,13 @@
 
         // Receive messages and update the chat UI
         socket.on('chat message', function(data) {
-            console.log("running chatmsg")
-
+            console.log("Received chat message:", data); // Debugging information
             if (data && data.msg && data.chat === currentChat) {  // Ensure data is not undefined and matches the current chat
-                console.log("data")
                 const item = document.createElement('li');
-                item.textContent = `[${data.class}] ${data.msg}`;
+                item.textContent = `[${data.userName}] ${data.msg}`;
                 document.getElementById('messages').appendChild(item);
-            }
-            else{
-                console.log("data is undefined or does not match current chat")
-                console.log("data: ", data)
-                console.log("datamsg: ", data.msg)
+            } else {
+                console.log("Message does not match current chat or is undefined");
             }
         });
 
@@ -216,17 +211,22 @@
         // Select a chat
         function selectChat() {
             currentChat = document.getElementById('chatSelect').value;
+            console.log("Selected chat:", currentChat); // Debugging information
             document.getElementById('messages').innerHTML = ''; // Clear previous messages
             // Fetch and display messages for the selected chat
             fetch(`/getMessages?chat=${currentChat}&userName=${userName}`)
                 .then(response => response.json())
                 .then(messages => {
+                    console.log("Fetched messages:", messages); // Debugging information
                     document.getElementById('messages').innerHTML = ''; // Clear previous messages
                     messages.forEach(message => {
                         const item = document.createElement('li');
-                        item.textContent = `[${message.class}] ${message.msg}`;
+                        item.textContent = `[${message.userName}] ${message.message}`;
                         document.getElementById('messages').appendChild(item);
                     });
+                })
+                .catch(error => {
+                    console.error('Error fetching messages:', error); // Debugging information
                 });
         }
 

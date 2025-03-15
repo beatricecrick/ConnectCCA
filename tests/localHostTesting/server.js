@@ -33,11 +33,22 @@ io.on('connection', async (socket) => {
         console.log(`${socket.id} joined class ${data.classInfo} as ${data.userName}`);
     });
 
-    socket.on('chat message', (msg, chat) => {
+    socket.on('chat message', async (msg, chat) => {
         const user = users[socket.id];
         if (user && chat) {
             io.emit('chat message', { msg, chat, userName: user.userName });
-            saveMessageToFirestore(msg, chat, user.userName); // Store message in Firestore with username
+            await saveMessageToFirestore(msg, chat, user.userName); // Store message in Firestore with username
+
+            // Add an information string for each user in the "public" chat
+            if (chat === 'public') {
+                const userInfoRef = db.collection('locations').doc('public').collection('users').doc(user.userName);
+                const userInfoDoc = await userInfoRef.get();
+                if (!userInfoDoc.exists) {
+                    await userInfoRef.set({
+                        info: ''
+                    });
+                }
+            }
         } else {
             console.error('Error: User or chat is not defined');
             console.log('User:', user);
@@ -90,6 +101,15 @@ app.post('/createUser', async (req, res) => {
             time: new Date(),
             date: new Date().toLocaleDateString(),
         });
+        const userChatRef = userRef.collection('chats');
+        const publicChatDoc = await userChatRef.doc('public').get();
+        if (!publicChatDoc.exists) {
+            await userChatRef.doc('public').set({
+                locationName: 'public',
+                time: new Date(),
+                date: new Date().toLocaleDateString(),
+            });
+        }
 
         // Ensure "Public Chat" exists in the locations collection
         const publicLocationRef = db.collection('locations').doc('public');
@@ -207,12 +227,8 @@ app.post('/createLocation', async (req, res) => {
                 settings: {},
             });
 
-            const userChatRef = db.collection('users').doc(member).collection('chats').doc(locationName);
-            batch.set(userChatRef, {
-                locationName: locationName,
-                time: new Date(),
-                date: new Date().toLocaleDateString(),
-            });
+
+            console.log("Added user:", member);
         });
         await batch.commit();
 
@@ -250,6 +266,9 @@ app.get('/getMessages', async (req, res) => {
 
     try {
         const usersSnapshot = await db.collection('locations').doc(chat).collection('users').get();
+        console.log("chat:", chat);
+        console.log("Users in chat:", usersSnapshot.docs.map(doc => doc.id));
+        console.log("Users snapshot:", usersSnapshot.docs);
         let messages = [];
 
         for (const userDoc of usersSnapshot.docs) {
