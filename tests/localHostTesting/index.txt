@@ -6,7 +6,11 @@
     <title>School Chat</title>
     <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
     <script src="https://apis.google.com/js/platform.js" async defer></script>
+<<<<<<< Updated upstream:tests/localHostTesting/src/index.txt
     <meta name="google-signin-client_id" content="YOUR_GOOGLE_CLIENT_ID">
+=======
+    <meta name="google-signin-client_id" content="311408478053-n7ri43936fuqjull1gg4rvac1a3vu723.apps.googleusercontent.com">
+>>>>>>> Stashed changes:tests/localHostTesting/index.txt
     <meta http-equiv="Cross-Origin-Opener-Policy" content="same-origin">
 </head>
 <body>
@@ -37,11 +41,21 @@
         let userName = localStorage.getItem('userName') || '';
         let userId = localStorage.getItem('userId') || '';
         let classInfo = 'Class Name'; // This should be dynamically generated (example: Google Classroom class info)
+<<<<<<< Updated upstream:tests/localHostTesting/src/index.txt
         let currentChat = '';
         //Ensure google API loads
         window.onload = function() {
             initGoogleSignIn();
         };
+=======
+        let currentChat = 'public'; // Set default chat to 'public'
+
+        // Ensure google API loads
+        window.onload = function() {
+            initGoogleSignIn();
+        };
+
+>>>>>>> Stashed changes:tests/localHostTesting/index.txt
         // Initialize Google Sign-In
         function initGoogleSignIn() {
             gapi.load('auth2', function() {
@@ -96,6 +110,17 @@
             document.getElementById('login').style.display = 'none';
             document.getElementById('chatUI').style.display = 'block';
             document.getElementById('userNameDisplay').textContent = userName;
+<<<<<<< Updated upstream:tests/localHostTesting/src/index.txt
+=======
+            const chatSelect = document.getElementById('chatSelect');
+            chatSelect.innerHTML = ''; // Clear previous options
+            const publicOption = document.createElement('option');
+            publicOption.value = 'public';
+            publicOption.textContent = 'public';
+            chatSelect.appendChild(publicOption);
+            chatSelect.value = currentChat; // Set dropdown to 'public'
+            selectChat(); // Automatically select the current chat
+>>>>>>> Stashed changes:tests/localHostTesting/index.txt
         }
 
         // Handle sending messages
@@ -172,17 +197,38 @@
 
         // Select a chat
         function selectChat() {
+<<<<<<< Updated upstream:tests/localHostTesting/src/index.txt
             currentChat = document.getElementById('chatSelect').value;
+=======
+            currentChat = document.getElementById('chatSelect').value || 'public'; // Default to 'public' if no chat is selected
+>>>>>>> Stashed changes:tests/localHostTesting/index.txt
             document.getElementById('messages').innerHTML = ''; // Clear previous messages
             // Fetch and display messages for the selected chat
             fetch(`/getMessages?chat=${currentChat}`)
                 .then(response => response.json())
                 .then(messages => {
+<<<<<<< Updated upstream:tests/localHostTesting/src/index.txt
                     messages.forEach(message => {
                         const item = document.createElement('li');
                         item.textContent = `[${message.class}] ${message.msg}`;
                         document.getElementById('messages').appendChild(item);
                     });
+=======
+                    console.log("Fetched messages:", messages); // Log the fetched messages
+                    document.getElementById('messages').innerHTML = ''; // Clear previous messages
+                    if (Array.isArray(messages)) {
+                        messages.forEach(message => {
+                            const item = document.createElement('li');
+                            item.textContent = `[${message.class}] ${message.message}`;
+                            document.getElementById('messages').appendChild(item);
+                        });
+                    } else {
+                        console.error('Error: messages is not an array', messages);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching messages:', error);
+>>>>>>> Stashed changes:tests/localHostTesting/index.txt
                 });
         }
 
