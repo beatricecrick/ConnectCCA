@@ -5,6 +5,50 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>School Chat</title>
     <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
+    <style>
+        .notification-bell {
+            position: relative;
+            display: inline-block;
+        }
+        .notification-count {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            background: red;
+            color: white;
+            border-radius: 50%;
+            padding: 5px;
+            font-size: 12px;
+            display: none;
+        }
+        .dropdown-content {
+            display: none;
+            position: absolute;
+            background-color: white;
+            min-width: 25vh;
+            box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+            z-index: 1;
+        }
+        .dropdown-content ul {
+            list-style-type: none;
+            padding: 0;
+            margin: 0;
+        }
+        .dropdown-content ul li {
+            padding: 8px 16px;
+            border-bottom: 1px solid #ddd;
+            cursor: pointer;
+        }
+        .dropdown-content ul li:hover {
+            background-color: #ddd;
+        }
+        .notification-bell:hover .dropdown-content {
+            display: block;
+        }
+        #friendName:focus + .dropdown-content {
+            display: block;
+        }
+    </style>
 </head>
 <body>
     <h1>School Chat</h1>
@@ -23,6 +67,23 @@
     <div id="chatUI" style="display: none;">
         <h3>Welcome, <span id="userNameDisplay"></span></h3>
         <button onclick="signOut()">Sign Out</button>
+        <div class="notification-bell">
+            <button onclick="showNotifications()">🔔</button> <!-- Notification bell -->
+            <div id="notificationCount" class="notification-count"></div>
+            <div class="dropdown-content">
+                <h4>Notifications</h4>
+                <ul id="notificationsList"></ul>
+            </div>
+        </div>
+        <div>
+            <label for="friendName">Add Friend:</label>
+            <input type="text" id="friendName" oninput="searchUsersForFriends()" />
+            <div class="dropdown-content" id="friendSearchResults">
+                <ul></ul>
+            </div>
+            <button onclick="addFriend()">Add Friend</button>
+            <p id="friend-error-message" style="color: red;"></p> <!-- Error message display -->
+        </div>
         <select id="chatSelect" onchange="selectChat()">
         </select>
         <ul id="messages"></ul>
@@ -38,6 +99,7 @@
         let userId = localStorage.getItem('userId') || '';
         let classInfo = 'Class Name'; // This should be dynamically generated (example: Google Classroom class info)
         let currentChat = 'public'; // Default to public chat
+        let friends = [];
 
         // Handle user login
         function login() {
@@ -119,6 +181,7 @@
             document.getElementById('userNameDisplay').textContent = userName;
             socket.emit('join', { classInfo, userName, userId }); // Rejoin the chat room
             selectChat(); // Automatically select the public chat
+            loadFriends(); // Load friends when showing chat UI
         }
 
         // Handle sending messages
@@ -237,6 +300,248 @@
             location.reload(); // Reload the page to show the login screen
         }
 
+        // Show notifications
+        function showNotifications() {
+            const notificationsList = document.getElementById('notificationsList');
+            fetch(`/getNotifications?userName=${userName}`)
+                .then(response => response.json())
+                .then(notifications => {
+                    notificationsList.innerHTML = '';
+                    notifications.forEach(notification => {
+                        const item = document.createElement('li');
+                        item.textContent = notification.type === 'friend_request' ? `Friend request from ${notification.from}` : `Invite to ${notification.locationName}`;
+                        const acceptButton = document.createElement('button');
+                        acceptButton.textContent = 'Accept';
+                        acceptButton.onclick = () => notification.type === 'friend_request' ? acceptFriendRequest(notification) : acceptInvite(notification);
+                        const denyButton = document.createElement('button');
+                        denyButton.textContent = 'Deny';
+                        denyButton.onclick = () => notification.type === 'friend_request' ? denyFriendRequest(notification) : denyInvite(notification);
+                        item.appendChild(acceptButton);
+                        item.appendChild(denyButton);
+                        notificationsList.appendChild(item);
+                    });
+                    updateNotificationCount(notifications.length);
+                })
+                .catch(error => {
+                    console.error('Error fetching notifications:', error);
+                });
+        }
+
+        // Update notification count
+        function updateNotificationCount(count) {
+            const notificationCount = document.getElementById('notificationCount');
+            if (count > 0) {
+                notificationCount.textContent = count;
+                notificationCount.style.display = 'block';
+            } else {
+                notificationCount.style.display = 'none';
+            }
+        }
+
+        // Accept invite
+        function acceptInvite(notification) {
+            fetch('/acceptInvite', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ userName, locationName: notification.locationName })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(error => { throw new Error(error.error); });
+                }
+                return response.json();
+            })
+            .then(data => {
+                alert('Invite accepted!');
+                fetchNotifications(); // Refresh notifications
+                loadChats(); // Refresh chats
+            })
+            .catch(error => {
+                console.error('Error accepting invite:', error);
+            });
+        }
+
+        // Deny invite
+        function denyInvite(notification) {
+            fetch('/denyInvite', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ userName, locationName: notification.locationName })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(error => { throw new Error(error.error); });
+                }
+                return response.json();
+            })
+            .then(data => {
+                alert('Invite denied!');
+                fetchNotifications(); // Refresh notifications
+            })
+            .catch(error => {
+                console.error('Error denying invite:', error);
+            });
+        }
+
+        // Load friends from Firebase
+        function loadFriends() {
+            fetch(`/getFriends?userName=${userName}`)
+                .then(response => response.json())
+                .then(friendsList => {
+                    friends = friendsList;
+                })
+                .catch(error => {
+                    console.error('Error fetching friends:', error);
+                });
+        }
+
+        // Search users for adding friends
+        function searchUsersForFriends() {
+            const query = document.getElementById('friendName').value.trim().toLowerCase();
+            if (query) {
+                fetch(`/searchUsers?query=${query}`)
+                    .then(response => response.json())
+                    .then(users => {
+                        const friendSearchResults = document.getElementById('friendSearchResults').querySelector('ul');
+                        friendSearchResults.innerHTML = '';
+                        users.slice(0, 5).forEach(user => { // Limit to 5 results
+                            if (user.toLowerCase().startsWith(query) && user !== userName && !friends.includes(user)) { // Exclude the current user and friends from search results
+                                const item = document.createElement('li');
+                                item.textContent = user;
+                                item.onclick = () => selectFriend(user);
+                                friendSearchResults.appendChild(item);
+                            }
+                        });
+                        document.getElementById('friendSearchResults').style.display = 'block';
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                    });
+            } else {
+                const friendSearchResults = document.getElementById('friendSearchResults').querySelector('ul');
+                friendSearchResults.innerHTML = '';
+                document.getElementById('friendSearchResults').style.display = 'none';
+            }
+        }
+
+        // Select a user from the friend search results
+        function selectFriend(user) {
+            document.getElementById('friendName').value = user;
+            const friendSearchResults = document.getElementById('friendSearchResults').querySelector('ul');
+            friendSearchResults.innerHTML = '';
+            document.getElementById('friendSearchResults').style.display = 'none';
+        }
+
+        // Add friend and send friend request
+        function addFriend() {
+            const friendName = document.getElementById('friendName').value.trim();
+            if (friendName && friendName !== userName && !friends.includes(friendName)) {
+                fetch('/addFriend', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ userName, friendName })
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        return response.json().then(error => { throw new Error(error.error); });
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    alert('Friend request sent!');
+                    document.getElementById('friendName').value = ''; // Clear input after adding
+                    document.getElementById('friend-error-message').textContent = ''; // Clear error message
+                })
+                .catch(error => {
+                    document.getElementById('friend-error-message').textContent = error.message; // Display error message
+                    console.error('Error:', error);
+                });
+            } else {
+                document.getElementById('friend-error-message').textContent = 'Invalid friend name or already added.';
+            }
+        }
+
+        // Fetch notifications on page load
+        function fetchNotifications() {
+            fetch(`/getNotifications?userName=${userName}`)
+                .then(response => response.json())
+                .then(notifications => {
+                    updateNotificationCount(notifications.length);
+                    const notificationsList = document.getElementById('notificationsList');
+                    notificationsList.innerHTML = '';
+                    notifications.forEach(notification => {
+                        const item = document.createElement('li');
+                        item.textContent = notification.type === 'friend_request' ? `Friend request from ${notification.from}` : `Invite to ${notification.locationName}`;
+                        const acceptButton = document.createElement('button');
+                        acceptButton.textContent = 'Accept';
+                        acceptButton.onclick = () => notification.type === 'friend_request' ? acceptFriendRequest(notification) : acceptInvite(notification);
+                        const denyButton = document.createElement('button');
+                        denyButton.textContent = 'Deny';
+                        denyButton.onclick = () => notification.type === 'friend_request' ? denyFriendRequest(notification) : denyInvite(notification);
+                        item.appendChild(acceptButton);
+                        item.appendChild(denyButton);
+                        notificationsList.appendChild(item);
+                    });
+                })
+                .catch(error => {
+                    console.error('Error fetching notifications:', error);
+                });
+        }
+
+        // Accept friend request
+        function acceptFriendRequest(notification) {
+            fetch('/acceptFriendRequest', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ userName, friendName: notification.from })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(error => { throw new Error(error.error); });
+                }
+                return response.json();
+            })
+            .then(data => {
+                alert('Friend request accepted!');
+                fetchNotifications(); // Refresh notifications
+            })
+            .catch(error => {
+                console.error('Error accepting friend request:', error);
+            });
+        }
+
+        // Deny friend request
+        function denyFriendRequest(notification) {
+            fetch('/denyFriendRequest', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ userName, friendName: notification.from })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(error => { throw new Error(error.error); });
+                }
+                return response.json();
+            })
+            .then(data => {
+                alert('Friend request denied!');
+                fetchNotifications(); // Refresh notifications
+            })
+            .catch(error => {
+                console.error('Error denying friend request:', error);
+            });
+        }
+
         // Ensure the chat UI is shown if the user navigates back
         window.addEventListener('popstate', function(event) {
             if (userName) {
@@ -252,6 +557,7 @@
                     if (users.some(user => user.name === userName)) {
                         showChatUI();
                         loadChats();
+                        fetchNotifications(); // Fetch notifications on page load
                         setInterval(checkDMs, 30000); // Check DMs every 30 seconds
                     } else {
                         localStorage.removeItem('userName');

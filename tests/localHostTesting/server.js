@@ -200,7 +200,7 @@ app.get('/checkLocation', async (req, res) => {
 
 // Create the location and update users' chats
 app.post('/createLocation', async (req, res) => {
-    const { locationName, members } = req.body;
+    const { locationName, members, owner } = req.body;
     console.log("Received request to create location:", req.body);
     try {
         const locationRef = db.collection('locations').doc(locationName);
@@ -218,17 +218,33 @@ app.post('/createLocation', async (req, res) => {
             date: new Date().toLocaleDateString(),
         });
 
-        // Add users to the location and update their chats
+        // Automatically add the owner to the location
+        const ownerChatRef = db.collection('users').doc(owner).collection('chats').doc(locationName);
+        await ownerChatRef.set({
+            locationName: locationName,
+            time: new Date(),
+            date: new Date().toLocaleDateString(),
+        });
+
+        const locationOwnerRef = db.collection('locations').doc(locationName).collection('users').doc(owner);
+        await locationOwnerRef.set({
+            info: '',
+            settings: {},
+        });
+
+        // Send notifications to users instead of automatically adding them
         const batch = db.batch();
         members.forEach(member => {
-            const userRef = locationRef.collection('users').doc(member);
-            batch.set(userRef, {
-                info: '',
-                settings: {},
-            });
-
-
-            console.log("Added user:", member);
+            if (member !== owner) {
+                const notificationRef = db.collection('users').doc(member).collection('notifications').doc(locationName);
+                batch.set(notificationRef, {
+                    locationName: locationName,
+                    time: new Date(),
+                    date: new Date().toLocaleDateString(),
+                    status: 'pending'
+                });
+                console.log("Notification sent to user:", member);
+            }
         });
         await batch.commit();
 
@@ -258,19 +274,15 @@ app.get('/getChats', async (req, res) => {
 app.get('/getMessages', async (req, res) => {
     const { chat } = req.query;
     console.log("Received request to get messages for chat:", chat);
-    
     // Validate chat
     if (!chat) {
         return res.status(400).json({ error: 'Chat is required' });
     }
-
     try {
         const usersSnapshot = await db.collection('locations').doc(chat).collection('users').get();
-        console.log("chat:", chat);
         console.log("Users in chat:", usersSnapshot.docs.map(doc => doc.id));
         console.log("Users snapshot:", usersSnapshot.docs);
         let messages = [];
-
         for (const userDoc of usersSnapshot.docs) {
             const userName = userDoc.id;
             const messagesSnapshot = await db.collection('locations').doc(chat).collection('users').doc(userName).collection('messages').orderBy('time').get();
@@ -286,10 +298,8 @@ app.get('/getMessages', async (req, res) => {
             });
             messages = messages.concat(userMessages);
         }
-
         // Sort all messages by timestamp
         messages.sort((a, b) => a.time.toDate() - b.time.toDate());
-
         res.json(messages);
     } catch (error) {
         console.error('Error getting messages:', error);
@@ -297,9 +307,168 @@ app.get('/getMessages', async (req, res) => {
     }
 });
 
+// Get notifications for a user
+app.get('/getNotifications', async (req, res) => {
+    const { userName } = req.query;
+    console.log("Received request to get notifications for user:", userName);
+    try {
+        const notificationsSnapshot = await db.collection('users').doc(userName).collection('notifications').get();
+        const notifications = notificationsSnapshot.docs.map(doc => doc.data());
+        res.json(notifications);
+    } catch (error) {
+        console.error('Error getting notifications:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// Accept invite
+app.post('/acceptInvite', async (req, res) => {
+    const { userName, locationName } = req.body;
+    console.log("Received request to accept invite:", req.body);
+    if (!locationName) {
+        return res.status(400).json({ error: 'Location name is required' });
+    }
+    try {
+        const userChatRef = db.collection('users').doc(userName).collection('chats').doc(locationName);
+        await userChatRef.set({
+            locationName: locationName,
+            time: new Date(),
+            date: new Date().toLocaleDateString(),
+        });
+
+        const locationUserRef = db.collection('locations').doc(locationName).collection('users').doc(userName);
+        await locationUserRef.set({
+            info: '',
+            settings: {},
+        });
+
+        // Remove the notification
+        const notificationRef = db.collection('users').doc(userName).collection('notifications').doc(locationName);
+        await notificationRef.delete();
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error accepting invite:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// Deny invite
+app.post('/denyInvite', async (req, res) => {
+    const { userName, locationName } = req.body;
+    console.log("Received request to deny invite:", req.body);
+    if (!locationName) {
+        return res.status(400).json({ error: 'Location name is required' });
+    }
+    try {
+        // Remove the notification
+        const notificationRef = db.collection('users').doc(userName).collection('notifications').doc(locationName);
+        await notificationRef.delete();
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error denying invite:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// Add friend request
+app.post('/addFriend', async (req, res) => {
+    const { userName, friendName } = req.body;
+    console.log("Received request to add friend:", req.body);
+    try {
+        let notificationId = `friend:${userName}`;
+        let i = 1;
+        let notificationRef = db.collection('users').doc(friendName).collection('notifications').doc(notificationId);
+        let doc = await notificationRef.get();
+        while (doc.exists) {
+            notificationId = `friend:${userName}+${i}`;
+            notificationRef = db.collection('users').doc(friendName).collection('notifications').doc(notificationId);
+            doc = await notificationRef.get();
+            i++;
+        }
+        await notificationRef.set({
+            type: 'friend_request',
+            from: userName,
+            time: new Date(),
+            date: new Date().toLocaleDateString(),
+            status: 'pending'
+        });
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error adding friend:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// Accept friend request
+app.post('/acceptFriendRequest', async (req, res) => {
+    const { userName, friendName } = req.body;
+    console.log("Received request to accept friend request:", req.body);
+    if (!friendName) {
+        return res.status(400).json({ error: 'Friend name is required' });
+    }
+    try {
+        const userFriendRef = db.collection('users').doc(userName).collection('friends').doc(friendName);
+        await userFriendRef.set({
+            name: friendName,
+            time: new Date(),
+            date: new Date().toLocaleDateString(),
+        });
+
+        const friendUserRef = db.collection('users').doc(friendName).collection('friends').doc(userName);
+        await friendUserRef.set({
+            name: userName,
+            time: new Date(),
+            date: new Date().toLocaleDateString(),
+        });
+
+        // Remove the notification
+        const notificationRef = db.collection('users').doc(userName).collection('notifications').doc(`friend:${friendName}`);
+        await notificationRef.delete();
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error accepting friend request:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// Deny friend request
+app.post('/denyFriendRequest', async (req, res) => {
+    const { userName, friendName } = req.body;
+    console.log("Received request to deny friend request:", req.body);
+    if (!friendName) {
+        return res.status(400).json({ error: 'Friend name is required' });
+    }
+    try {
+        // Remove the notification
+        const notificationRef = db.collection('users').doc(userName).collection('notifications').doc(`friend:${friendName}`);
+        await notificationRef.delete();
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error denying friend request:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// Get friends for a user
+app.get('/getFriends', async (req, res) => {
+    const { userName } = req.query;
+    console.log("Received request to get friends for user:", userName);
+    try {
+        const friendsSnapshot = await db.collection('users').doc(userName).collection('friends').get();
+        const friends = friendsSnapshot.docs.map(doc => doc.id);
+        res.json(friends);
+        console.log("Friends:", friends);
+    } catch (error) {
+        console.error('Error getting friends:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+module.exports = app;//for vercel
 server.listen(3000, () => {
     console.log('Server is running on http://localhost:3000');
 });
-
-//for vercel
-module.exports = app;
